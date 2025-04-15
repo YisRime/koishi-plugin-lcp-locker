@@ -116,7 +116,7 @@ export interface Config {
   apiKey: string
 }
 
-export const Config = Schema.object({
+export const Config: Schema<Config> = Schema.object({
   apiEndpoint: Schema.string().description('API Point').required(),
   apiKey: Schema.string().description('API Key').required(),
   enableLucky: Schema.boolean().description('启用欧皇彩解锁日期获取').default(true),
