@@ -44,19 +44,21 @@ export interface Config {
   apiEndpoint: string
   apiKey: string
   codePrefix: string
+  hidePrefix: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
   apiEndpoint: Schema.string().description('API Endpoint').required(),
   apiKey: Schema.string().description('API Key').required(),
   codePrefix: Schema.string().description('识别码前缀').default('PCL2-'),
+  hidePrefix: Schema.boolean().description('禁用描述文本显示').default(false),
   enableLucky: Schema.boolean().description('启用欧皇彩解锁日期获取').default(true),
   enableBlue: Schema.boolean().description('启用极客蓝解锁码获取').default(true),
   enablePink: Schema.boolean().description('启用铁杆粉解锁键值获取').default(true),
   enableOrange: Schema.boolean().description('启用活跃橙解锁码获取').default(true),
   enableGold: Schema.boolean().description('启用秋仪金解锁码获取').default(true),
   enableAll: Schema.boolean().description('启用全部主题解锁键值获取').default(true),
-  enableCryptography: Schema.boolean().description('启用内容加解密').default(true),
+  enableCryptography: Schema.boolean().description('启用内容加解密').default(true)
 })
 
 /**
@@ -96,6 +98,15 @@ export function apply(ctx: Context, config: Config) {
     try {
       const response = await request(themeKey, code);
       if (!response?.result) return '';
+      // 只返回结果内容
+      if (config.hidePrefix) {
+        let result = response.result;
+        if (themeKey === 'all' && config.enableGold && response.goldKey) {
+          result += `\n${response.goldKey}`;
+        }
+        return result;
+      }
+      // 否则返回完整内容
       let result = `${THEME_MAP[themeKey]}${
         themeKey === 'lucky' ? '解锁日期' :
         themeKey === 'pink' ? '解锁键值(SystemCount)' :
