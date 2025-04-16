@@ -121,28 +121,25 @@ export function apply(ctx: Context, config: Config) {
     }
   }
 
-  const unlk = ctx.command('unlk', '启动器主题解锁')
-    .usage('根据识别码生成对应解锁码或键值，解锁启动器相应主题');
+  const unlk = ctx.command('unlk', '主题解锁')
+    .usage('根据识别码生成对应解锁码或键值，解锁相应主题');
 
-  unlk.subcommand('.code [code]', '查询或绑定识别码')
-    .usage(`查询当前绑定的识别码或绑定新的识别码`)
-    .example(`unlk.code ${config.codePrefix}${config.codePrefix}${config.codePrefix}${config.codePrefix} - 绑定新的识别码`)
+  unlk.subcommand('.code <code>', '绑定识别码')
+    .usage(`输入带固定前缀的识别码绑定`)
+    .example(`unlk.code ${config.codePrefix}${config.codePrefix}${config.codePrefix}${config.codePrefix} 绑定新的识别码`)
     .action(async ({ session }, code?) => {
       if (!session?.userId) return '';
-      if (code) {
-        if (config.codePrefix && !code.toUpperCase().startsWith(config.codePrefix.toUpperCase())) {
-          return '';
-        }
-        const prefixRegex = new RegExp(`^${config.codePrefix}`, 'i');
-        const codeWithoutPrefix = code.replace(prefixRegex, '');
-        if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(codeWithoutPrefix)) {
-          return '';
-        }
-        await DataManager.addCode(ctx.baseDir, session.userId, codeWithoutPrefix.toUpperCase());
-        return `已成功绑定识别码: ${codeWithoutPrefix.toUpperCase()}`;
+      if (config.codePrefix && !code.toUpperCase().startsWith(config.codePrefix.toUpperCase())) {
+        return ``;
       }
-      const currentCode = await DataManager.getCode(ctx.baseDir, session.userId);
-      return currentCode ? `当前绑定的识别码: ${currentCode}` : '';
+      const prefixRegex = new RegExp(`^${config.codePrefix}`, 'i');
+      const codeWithoutPrefix = code.replace(prefixRegex, '');
+      if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(codeWithoutPrefix)) {
+        return ``;
+      }
+      const formattedCode = codeWithoutPrefix.toUpperCase();
+      await DataManager.addCode(ctx.baseDir, session.userId, formattedCode);
+      return ``;
     });
 
   [
