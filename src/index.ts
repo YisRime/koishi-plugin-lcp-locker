@@ -18,10 +18,9 @@ interface UserData {
 }
 
 /**
- * 主题信息映射表
- * @constant THEME_MAP
+ * 主题类型映射表
  */
-const THEME_MAP: Record<string, string> = {
+const THEME_MAP = {
   'orange': '活跃橙',
   'blue': '极客蓝',
   'pink': '铁杆粉',
@@ -29,76 +28,6 @@ const THEME_MAP: Record<string, string> = {
   'gold': '秋仪金',
   'all': '全部主题'
 };
-
-/**
- * 数据管理类 - 处理用户数据的存储和检索
- * @class DataManager
- */
-class DataManager {
-  /**
-   * 加载用户数据
-   * @param {string} dataDir - 数据目录
-   * @returns {Promise<UserData>} 用户数据对象
-   */
-  static async loadData(dataDir: string): Promise<UserData> {
-    try {
-      const filePath = path.join(dataDir, 'data', 'lcp-locker.json');
-      const content = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(content);
-    } catch {
-      return {};
-    }
-  }
-
-  /**
-   * 保存用户数据
-   * @param {string} dataDir - 数据目录
-   * @param {UserData} data - 用户数据对象
-   * @returns {Promise<void>}
-   */
-  static async saveData(dataDir: string, data: UserData): Promise<void> {
-    const dataPath = path.join(dataDir, 'data');
-    const filePath = path.join(dataPath, 'lcp-locker.json');
-    try {
-      await fs.mkdir(dataPath, { recursive: true });
-      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (error) {
-      return;
-    }
-  }
-
-  /**
-   * 添加识别码并设为当前使用
-   * @param {string} dataDir - 数据目录
-   * @param {string} userId - 用户ID
-   * @param {string} code - 识别码
-   * @returns {Promise<void>}
-   */
-  static async addCode(dataDir: string, userId: string, code: string): Promise<void> {
-    const data = await this.loadData(dataDir);
-    if (!data[userId]) {
-      data[userId] = { current: null, codes: [] };
-    }
-    // 添加到历史识别码列表
-    if (!data[userId].codes.includes(code)) {
-      data[userId].codes.push(code);
-    }
-    // 设置为当前使用的识别码
-    data[userId].current = code;
-    await this.saveData(dataDir, data);
-  }
-
-  /**
-   * 获取用户当前识别码
-   * @param {string} dataDir - 数据目录
-   * @param {string} userId - 用户ID
-   * @returns {Promise<string|null>} 用户当前识别码或null
-   */
-  static async getCode(dataDir: string, userId: string): Promise<string | null> {
-    const data = await this.loadData(dataDir);
-    return data[userId]?.current || null;
-  }
-}
 
 /**
  * 插件配置接口
@@ -114,11 +43,13 @@ export interface Config {
   enableCryptography: boolean
   apiEndpoint: string
   apiKey: string
+  codePrefix: string
 }
 
 export const Config: Schema<Config> = Schema.object({
-  apiEndpoint: Schema.string().description('API Point').required(),
+  apiEndpoint: Schema.string().description('API Endpoint').required(),
   apiKey: Schema.string().description('API Key').required(),
+  codePrefix: Schema.string().description('识别码前缀').default('PCL2-'),
   enableLucky: Schema.boolean().description('启用欧皇彩解锁日期获取').default(true),
   enableBlue: Schema.boolean().description('启用极客蓝解锁码获取').default(true),
   enablePink: Schema.boolean().description('启用铁杆粉解锁键值获取').default(true),
@@ -129,117 +60,177 @@ export const Config: Schema<Config> = Schema.object({
 })
 
 /**
- * 插件应用函数
- * @param {Context} ctx - Koishi上下文
- * @param {Config} config - 插件配置
+ * 插件主函数，用于初始化和注册命令
+ * @param ctx - Koishi上下文
+ * @param config - 插件配置
  */
 export function apply(ctx: Context, config: Config) {
   /**
-   * 发送API请求
-   * @param {string} action - 请求动作
-   * @param {string} code - 识别码
-   * @param {string} [content] - 请求内容
-   * @returns {Promise<ApiResponse>} API响应
+   * 向API发送请求
+   * @param action - 操作类型
+   * @param code - 识别码
+   * @param content - 可选内容，用于加解密操作
+   * @returns API响应结果
    */
   async function request(action: string, code: string, content?: string): Promise<ApiResponse> {
     try {
-      const params: Record<string, string> = {
-        identify: config.apiKey,
-        code,
-        action
-      };
-      if (content) params.content = content;
-      const response = await axios.get<ApiResponse>(config.apiEndpoint, { params });
-      return response.data;
-    } catch (error) {
-      throw new Error(`API请求失败: ${error.message}`);
+      const params = { identify: config.apiKey, code, action };
+      if (content) params['content'] = content;
+      const { data } = await axios.get<ApiResponse>(config.apiEndpoint, { params });
+      return data;
+    } catch {
+      return { result: '' };
     }
   }
+
   /**
-   * 处理主题命令
-   * @param {string} session - 用户会话
-   * @param {string} themeKey - 主题键名
-   * @returns {Promise<string>} 响应消息
+   * 处理各种主题相关命令
+   * @param session - 用户会话
+   * @param themeKey - 主题类型键名
+   * @returns 包含解锁信息的响应字符串
    */
   async function handleThemeCommand(session, themeKey: string): Promise<string> {
-    if (!session?.userId) return '无法获取用户ID';
+    if (!session?.userId) return '';
     const code = await DataManager.getCode(ctx.baseDir, session.userId);
-    if (!code) return '请先绑定识别码';
+    if (!code) return '';
     try {
       const response = await request(themeKey, code);
-      let result = `${THEME_MAP[themeKey]}${themeKey === 'lucky' ? '解锁日期' :
+      if (!response?.result) return '';
+      let result = `${THEME_MAP[themeKey]}${
+        themeKey === 'lucky' ? '解锁日期' :
         themeKey === 'pink' ? '解锁键值(SystemCount)' :
-        themeKey === 'all' ? '全部主题解锁键值(UiLauncherThemeHide2)' : '解锁码'}:\n${response.result}`;
+        themeKey === 'all' ? '解锁键值(UiLauncherThemeHide2)' : '解锁码'
+      }:\n${response.result}`;
       if (themeKey === 'all' && config.enableGold && response.goldKey) {
         result += `\n秋仪金解锁键值(UiLauncherThemeGold):\n${response.goldKey}`;
       }
       return result;
-    } catch (error) {
-      return `获取${THEME_MAP[themeKey]}${themeKey === 'lucky' ? '解锁日期' :
-        themeKey === 'pink' || themeKey === 'all' ? '解锁键值' : '解锁码'}失败: ${error.message}`;
+    } catch {
+      return '';
     }
   }
-  // 注册主命令
+
   const unlk = ctx.command('unlk', '启动器主题解锁')
-    .usage('根据识别码生成对应解锁码或键值，从而解锁对应主题');
-  // 查看或绑定识别码
+    .usage('根据识别码生成对应解锁码或键值，解锁启动器相应主题');
+
   unlk.subcommand('.code [code]', '查询或绑定识别码')
-    .usage('查询当前绑定的识别码或绑定新识别码')
-    .example('unlk.code XXXX-XXXX-XXXX-XXXX 绑定识别码')
+    .usage(`查询当前绑定的识别码或绑定新的识别码`)
+    .example(`unlk.code ${config.codePrefix}${config.codePrefix}${config.codePrefix}${config.codePrefix} - 绑定新的识别码`)
     .action(async ({ session }, code?) => {
-      if (!session?.userId) return '无法获取用户ID';
+      if (!session?.userId) return '';
       if (code) {
-        if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(code)) {
-          return '识别码格式不正确！';
+        if (config.codePrefix && !code.toUpperCase().startsWith(config.codePrefix.toUpperCase())) {
+          return '';
         }
-        await DataManager.addCode(ctx.baseDir, session.userId, code.toUpperCase());
-        return `已绑定识别码: ${code}`;
+        const prefixRegex = new RegExp(`^${config.codePrefix}`, 'i');
+        const codeWithoutPrefix = code.replace(prefixRegex, '');
+        if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(codeWithoutPrefix)) {
+          return '';
+        }
+        await DataManager.addCode(ctx.baseDir, session.userId, codeWithoutPrefix.toUpperCase());
+        return `已成功绑定识别码: ${codeWithoutPrefix.toUpperCase()}`;
       }
       const currentCode = await DataManager.getCode(ctx.baseDir, session.userId);
-      return currentCode ? `当前识别码: ${currentCode}` : '请先绑定识别码';
+      return currentCode ? `当前绑定的识别码: ${currentCode}` : '';
     });
-  // 根据配置动态注册主题命令
-  const themeCommands = [
-    { key: 'lucky', enabled: config.enableLucky, desc: '获取欧皇彩解锁日期', usage: '在对应日期使用"今日人品"从而解锁欧皇彩' },
-    { key: 'blue', enabled: config.enableBlue, desc: '获取极客蓝解锁码', usage: '输入解锁码从而解锁极客蓝' },
-    { key: 'pink', enabled: config.enablePink, desc: '获取铁杆粉解锁键值', usage: '修改注册表对应键值从而解锁铁杆粉' },
-    { key: 'orange', enabled: config.enableOrange, desc: '获取活跃橙解锁码', usage: '输入解锁码从而解锁活跃橙' },
-    { key: 'gold', enabled: config.enableGold, desc: '获取秋仪金解锁码', usage: '输入解锁码从而解锁秋仪金' },
-    { key: 'all', enabled: config.enableAll, desc: '获取全部主题解锁键值', usage: '修改注册表对应键值从而解锁全部主题' }
-  ];
-  themeCommands.forEach(theme => {
-    if (theme.enabled) {
-      unlk.subcommand(`.${theme.key}`, theme.desc)
-        .usage(theme.usage)
-        .action(async ({ session }) => handleThemeCommand(session, theme.key));
-    }
+
+  [
+    { key: 'lucky', enabled: config.enableLucky, desc: '获取欧皇彩解锁日期', usage: '在指定日期使用"今日人品"功能解锁欧皇彩主题' },
+    { key: 'blue', enabled: config.enableBlue, desc: '获取极客蓝解锁码', usage: '使用解锁码解锁极客蓝主题' },
+    { key: 'pink', enabled: config.enablePink, desc: '获取铁杆粉解锁键值', usage: '修改注册表对应键值解锁铁杆粉主题' },
+    { key: 'orange', enabled: config.enableOrange, desc: '获取活跃橙解锁码', usage: '使用解锁码解锁活跃橙主题' },
+    { key: 'gold', enabled: config.enableGold, desc: '获取秋仪金解锁码', usage: '使用解锁码解锁秋仪金主题' },
+    { key: 'all', enabled: config.enableAll, desc: '获取全部主题解锁键值', usage: '修改注册表对应键值解锁全部主题' }
+  ].filter(theme => theme.enabled).forEach(theme => {
+    unlk.subcommand(`.${theme.key}`, theme.desc)
+      .usage(theme.usage)
+      .action(async ({ session }) => handleThemeCommand(session, theme.key));
   });
-  // 注册加解密命令
+
   if (config.enableCryptography) {
     /**
-     * 处理加解密命令
-     * @param {string} session - 用户会话
-     * @param {string} text - 待处理文本
-     * @param {string} action - 动作类型
-     * @returns {Promise<string>} 响应消息
+     * 处理内容加密/解密功能
+     * @param session - 用户会话
+     * @param text - 要处理的文本内容
+     * @param action - 操作类型：加密或解密
+     * @returns 加密或解密后的结果字符串
      */
     async function handleCryptography(session, text: string, action: 'encrypt' | 'decrypt'): Promise<string> {
-      if (!session?.userId) return '无法获取用户ID';
-      if (!text) return `请输入需要${action === 'encrypt' ? '加密' : '解密'}的内容`;
+      if (!session?.userId || !text) return '';
       const code = await DataManager.getCode(ctx.baseDir, session.userId);
-      if (!code) return '请先绑定识别码';
+      if (!code) return '';
       try {
         const response = await request(action, code, text);
-        return `${action === 'encrypt' ? '加密' : '解密'}结果:\n${response.result}`;
-      } catch (error) {
-        return `${action === 'encrypt' ? '加密' : '解密'}失败: ${error.message}`;
+        return response?.result ? `${action === 'encrypt' ? '加密' : '解密'}结果:\n${response.result}` : '';
+      } catch {
+        return '';
       }
     }
+
     unlk.subcommand('.enpt <text>', '加密自定义内容')
-      .usage('使用与主题相同的逻辑加密自定义内容')
+      .usage('使用与主题相同的加密逻辑加密自定义内容')
       .action(async ({ session }, text) => handleCryptography(session, text, 'encrypt'));
     unlk.subcommand('.dept <text>', '解密自定义内容')
-      .usage('使用与主题相同的逻辑解密自定义内容')
+      .usage('使用与主题相同的解密逻辑解密自定义内容')
       .action(async ({ session }, text) => handleCryptography(session, text, 'decrypt'));
+  }
+}
+
+/**
+ * 用户数据管理类
+ * 负责用户识别码的存储、读取和管理
+ */
+class DataManager {
+  /**
+   * 从文件中加载用户数据
+   * @param dataDir - 数据目录路径
+   * @returns 用户数据对象
+   */
+  static async loadData(dataDir: string): Promise<UserData> {
+    try {
+      const content = await fs.readFile(path.join(dataDir, 'data', 'lcp-locker.json'), 'utf-8');
+      return JSON.parse(content);
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * 保存用户数据到文件
+   * @param dataDir - 数据目录路径
+   * @param data - 用户数据对象
+   */
+  static async saveData(dataDir: string, data: UserData): Promise<void> {
+    try {
+      const dataPath = path.join(dataDir, 'data');
+      await fs.writeFile(path.join(dataPath, 'lcp-locker.json'), JSON.stringify(data, null, 2), 'utf-8');
+    } catch {
+      return;
+    }
+  }
+
+  /**
+   * 添加或更新用户的识别码
+   * @param dataDir - 数据目录路径
+   * @param userId - 用户ID
+   * @param code - 识别码
+   */
+  static async addCode(dataDir: string, userId: string, code: string): Promise<void> {
+    const data = await this.loadData(dataDir);
+    if (!data[userId]) data[userId] = { current: null, codes: [] };
+    if (!data[userId].codes.includes(code)) data[userId].codes.push(code);
+    data[userId].current = code;
+    await this.saveData(dataDir, data);
+  }
+
+  /**
+   * 获取用户当前绑定的识别码
+   * @param dataDir - 数据目录路径
+   * @param userId - 用户ID
+   * @returns 用户当前的识别码，不存在则返回null
+   */
+  static async getCode(dataDir: string, userId: string): Promise<string | null> {
+    const data = await this.loadData(dataDir);
+    return data[userId]?.current || null;
   }
 }
