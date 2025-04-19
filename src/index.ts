@@ -1,7 +1,6 @@
 import { Context, Schema } from 'koishi'
 import * as path from 'path'
 import * as fs from 'fs/promises'
-import axios from 'axios'
 
 export const name = 'lcp-locker'
 
@@ -43,14 +42,12 @@ export interface Config {
   enableCryptography: boolean
   apiEndpoint: string
   apiKey: string
-  codePrefix: string
   hidePrefix: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
   apiEndpoint: Schema.string().description('API Endpoint').required(),
   apiKey: Schema.string().description('API Key').required(),
-  codePrefix: Schema.string().description('识别码前缀').default('PCL2-'),
   hidePrefix: Schema.boolean().description('禁用描述文本显示').default(false),
   enableLucky: Schema.boolean().description('启用欧皇彩解锁日期获取').default(true),
   enableBlue: Schema.boolean().description('启用极客蓝解锁码获取').default(true),
@@ -76,10 +73,17 @@ export function apply(ctx: Context, config: Config) {
    */
   async function request(action: string, code: string, content?: string): Promise<ApiResponse> {
     try {
-      const params = { identify: config.apiKey, code, action };
-      if (content) params['content'] = content;
-      const { data } = await axios.get<ApiResponse>(config.apiEndpoint, { params });
-      return data;
+      const params = new URLSearchParams();
+      params.append('identify', config.apiKey);
+      params.append('code', code);
+      params.append('action', action);
+      if (content) params.append('content', content);
+      const url = `${config.apiEndpoint}?${params.toString()}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return await response.json();
     } catch {
       return { result: '' };
     }
@@ -125,19 +129,15 @@ export function apply(ctx: Context, config: Config) {
     .usage('根据识别码生成对应解锁码或键值，解锁相应主题');
 
   unlk.subcommand('.code <code>', '绑定识别码')
-    .usage(`输入带固定前缀的识别码绑定`)
-    .example(`unlk.code ${config.codePrefix}${config.codePrefix}${config.codePrefix}${config.codePrefix} 绑定新的识别码`)
+    .usage(`输入识别码绑定`)
+    .example(`unlk.code ABCD-EFGH-IJKL-MNOP 绑定新的识别码`)
     .action(async ({ session }, code?) => {
       if (!session?.userId) return '';
-      if (config.codePrefix && !code.toUpperCase().startsWith(config.codePrefix.toUpperCase())) {
+      // 直接检查识别码格式，不再需要前缀判断
+      if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(code)) {
         return ``;
       }
-      const prefixRegex = new RegExp(`^${config.codePrefix}`, 'i');
-      const codeWithoutPrefix = code.replace(prefixRegex, '');
-      if (!/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/i.test(codeWithoutPrefix)) {
-        return ``;
-      }
-      const formattedCode = codeWithoutPrefix.toUpperCase();
+      const formattedCode = code.toUpperCase();
       await DataManager.addCode(ctx.baseDir, session.userId, formattedCode);
       return ``;
     });
