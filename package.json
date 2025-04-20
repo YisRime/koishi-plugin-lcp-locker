@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-lcp-locker",
   "description": "个人自用测试插件，点击头像查看本人所有插件",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "contributors": [
     "Yis_Rime <yis_rime@outlook.com>"
   ],
