@@ -2,11 +2,11 @@
 
 [![npm](https://img.shields.io/npm/v/koishi-plugin-lcp-locker?style=flat-square)](https://www.npmjs.com/package/koishi-plugin-lcp-locker)
 
-解密测试，个人自用
+个人自用测试插件，点击头像查看本人所有插件
 
 ## 介绍
 
-这是一个 Koishi 插件，用于生成不同类型主题的解锁码或键值。通过识别码，用户可以获取对应的解锁信息，包括活跃橙、极客蓝、铁杆粉、欧皇彩、秋仪金等主题。
+用于生成不同类型主题的解锁码或键值。通过识别码，用户可以获取对应的解锁信息，包括活跃橙、极客蓝、铁杆粉、欧皇彩、秋仪金等主题。
 
 ## 功能特性
 
@@ -42,7 +42,7 @@
 首先需要绑定您的识别码：
 
 ```text
-unlk.code ABCD-EFGH-IJKL-MNOP
+unlk.code XXXX-XXXX-XXXX-XXXX
 ```
 
 识别码格式为：四组由连字符分隔的四个字符，每个字符为0-9或A-F。
